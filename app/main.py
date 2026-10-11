@@ -1148,13 +1148,16 @@ def _checked_path_date(name: str, value: str) -> str:
     return value
 
 
+ATTENDANCE_SORT = [("date", -1), ("emp_code", 1)]      # GET /attendance order; the explain command uses the same list
+
+
 def attendance_page_cursor(query: dict, skip: int, limit: int):
     """The attendance page query. Filter, sort and pagination all run in MongoDB. Sort = date desc,
     emp_code asc, which is the (date -1, emp_code 1) index; an emp_code filter is served by the unique
     (emp_code, date) index scanned backwards, a status filter by (status, date -1, emp_code 1)."""
     return (
         db.attendance_logs.find(query, {"_id": 0})
-        .sort([("date", -1), ("emp_code", 1)])
+        .sort(ATTENDANCE_SORT)
         .skip(skip)
         .limit(limit)
     )
@@ -1308,30 +1311,69 @@ def _explain_department_trend(department: Optional[str], date_from: Optional[str
     return TREND_COLLECTION, _trend_pipeline_for(department, date_from, date_to)
 
 
+# ---- explain for the Phase 1-5.2 operations (Phase 5.5) ----
+def _required_query(**values):
+    missing = [name for name, value in values.items() if value is None]
+    if missing:
+        raise RequestValidationError(
+            [{"type": "missing", "loc": ("query", name), "msg": "Field required", "input": None} for name in missing])
+
+
+def _explain_employee_monthly(emp_code: Optional[str], month: Optional[str]):
+    _required_query(emp_code=emp_code, month=month)
+    year, mon = _checked_month(month)
+    return "attendance_logs", employee_monthly_pipeline(emp_code, year, mon)            # the endpoint's builder
+
+
+def _explain_department_summary(month: Optional[str], department: Optional[str]):
+    _required_query(month=month)
+    year, mon = _checked_month(month)
+    return DEPARTMENT_SUMMARY_COLLECTION, department_summary_pipeline(year, mon, department)   # the endpoint's builder
+
+
+def _explain_attendance_list(emp_code, date_from, date_to, status, page, page_size):
+    """The page query of GET /attendance, built from the same helpers the endpoint uses: attendance_list_filter,
+    page_skip and ATTENDANCE_SORT. Returns (collection, the `find` command document)."""
+    date_from = _checked_date_param("date_from", date_from)
+    date_to = _checked_date_param("date_to", date_to)
+    try:
+        validate_date_range(date_from, date_to)
+    except ValueError as e:
+        raise RequestValidationError(
+            [{"type": "value_error", "loc": ("query", "date_from"), "msg": f"Value error, {e}", "input": date_from}]
+        ) from None
+    query = attendance_list_filter(emp_code, date_from, date_to, status)
+    return "attendance_logs", {"find": "attendance_logs", "filter": query, "sort": dict(ATTENDANCE_SORT),
+                               "projection": {"_id": 0}, "skip": page_skip(page, page_size), "limit": page_size}
+
+
 @app.get("/admin/explain/{endpoint}")
 def admin_explain(
     endpoint: Literal["attendance_list", "employee_monthly", "department_summary", "late_leaderboard",
                       "department_trend"],
+    emp_code: Optional[str] = None,
     month: Optional[str] = Query(None, pattern=MONTH_PATTERN),
     limit: int = Query(DEFAULT_LEADERBOARD_LIMIT, ge=1, le=MAX_LEADERBOARD_LIMIT),
     department: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    status: Optional[AttendanceStatus] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     trend_from: Optional[str] = Query(None, alias="from"),
     trend_to: Optional[str] = Query(None, alias="to"),
 ):
-    # Registered so far: late_leaderboard (5.3) and department_trend (5.4); the other operations are added by their
-    # own phases.
+    """executionStats explain of the named endpoint's main query / pipeline, built by the endpoint's own builder."""
     if endpoint == "late_leaderboard":
-        collection, pipeline = _explain_late_leaderboard(month, limit, department)
+        collection, body = _explain_late_leaderboard(month, limit, department)
     elif endpoint == "department_trend":
-        collection, pipeline = _explain_department_trend(department, trend_from, trend_to)
+        collection, body = _explain_department_trend(department, trend_from, trend_to)
+    elif endpoint == "employee_monthly":
+        collection, body = _explain_employee_monthly(emp_code, month)
+    elif endpoint == "department_summary":
+        collection, body = _explain_department_summary(month, department)
     else:
-        raise HTTPException(501, f"explain for '{endpoint}' is not implemented yet")
-    out = db.command({"explain": {"aggregate": collection, "pipeline": pipeline, "cursor": {}},
-                      "verbosity": "executionStats"})
+        collection, body = _explain_attendance_list(emp_code, date_from, date_to, status, page, page_size)
+    inner = body if isinstance(body, dict) else {"aggregate": collection, "pipeline": body, "cursor": {}}
+    out = db.command({"explain": inner, "verbosity": "executionStats"})
     return {"endpoint": endpoint, "collection": collection, "explain": json.loads(json_util.dumps(out))}
-
-
-# --------------------------------------------------------------------------- #
-# TODO - the rest of the contract (see openapi.yaml):
-#   GET   /admin/explain/{endpoint}   (attendance_list, employee_monthly, department_summary)
-# --------------------------------------------------------------------------- #

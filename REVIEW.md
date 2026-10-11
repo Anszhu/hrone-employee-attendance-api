@@ -1,21 +1,39 @@
-# Implementation Review
+# REVIEW.md
 
-The implementation was developed and tested against the supplied API contract. The following implementation risks were addressed and tested.
+Defects in the starter `app/main.py` (helpers and endpoints) that the current `app/main.py` fixes.
 
-| # | Area | Risk addressed | Testing approach | Fix or mitigation |
+**Evidence.** Rows marked *(run)* were observed by calling the starter's helper function and the current one directly with the input shown. Every other row comes from comparing the starter source with the current source; no test result is claimed for it. Locations are function names (no line numbers).
+
+| # | Where (function) | What is wrong | How you'd notice it (input or symptom) | How the current code fixes it |
 |---|---|---|---|---|
-| 1 | MongoDB configuration and health | The API must detect database connectivity failures. | Health tests, including database failure. | Environment-based configuration and database ping. |
-| 2 | Index creation | Repeated startup must not create duplicate indexes. | Index and startup tests. | Idempotent index creation. |
-| 3 | Employee creation | Invalid data and duplicate employee codes must be rejected. | Validation, duplicate, and concurrency tests. | Request validation and a unique employee-code index. |
-| 4 | Attendance punch-in | Concurrent requests must not create duplicate daily records. | Duplicate and concurrent punch-in tests. | Unique compound index on employee code and attendance date. |
-| 5 | Punch-out calculations | Overnight shifts, time boundaries, and concurrent punch-outs require careful handling. | Boundary, overnight, and concurrency tests. | Atomic updates and explicit time calculations. |
-| 6 | Attendance regularization | Updates must preserve audit history and reject invalid or unchanged requests. | PATCH validation and history tests. | Conditional updates, derived-field recalculation, and appended history entries. |
-| 7 | Legacy documents | Older attendance records may omit derived fields. | Legacy-document tests. | Defaults for missing fields during serialization and aggregation. |
-| 8 | Analytics | Empty periods, ranking ties, and employees without logs need correct handling. | Expected-result and randomized tests. | Database-side aggregation pipelines with explicit rules. |
-| 9 | Query diagnostics | Analytics queries must use indexes on representative data. | MongoDB execution-statistics diagnostics. | Explain endpoints reuse the corresponding query or pipeline builders. |
+| 1 | `compute_late_minutes` | Works on a naive datetime with `replace(hour=...)`, truncates with `int(.../60)` and then tests `minutes > 10` on whole minutes, so the 10-minute grace is not "strictly more than 10:00". | *(run)* shift 09:30, punch-in 09:40:01: starter returns 0, R2 says 10. | `compute_late_minutes(punch_in, shift_start, date_str)`: IST shift-start instant for the attendance date, instants cut to whole seconds, late only when `late_seconds > GRACE_SECONDS` (600), then `late_seconds // 60`. |
+| 2 | `compute_work_hours` | `round(seconds / 3600, 2)` is float rounding (not half-up, R4). | *(run)* 14850 s (4.125 h): starter 4.12, R4 half-up gives 4.13. | Integer arithmetic: `(seconds * 100 + 1800) // 3600` hundredths, then `/ 100`. |
+| 3 | `compute_overtime` | No 30-minute minimum (R3); no overnight handling (the end is always on the same date); mixes a timezone-aware shift end with whatever `punch_out` it is given. | *(run)* 10 min after an 18:30 end: starter 10, R3 says 0. *(run)* naive `punch_out`: `TypeError`. *(run)* shift 22:00-06:00, punch-out 06:40 next day: starter 1480, sample 7 says 40. | `compute_overtime(punch_out, shift_start, shift_end, date_str)`: shift end on the next day for overnight shifts, whole minutes, counted only when `>= MIN_OVERTIME_MINUTES` (30). |
+| 4 | `EmployeeIn` | Every field is a bare `str`: no `emp_code`/email/`HH:MM` patterns, no length limits, `shift_start == shift_end` accepted, `joined_on` not checked as a real date. | `POST /employees` with `joined_on: "2026-02-30"` or equal shifts is accepted (201) instead of 422. | `Field(pattern=..., min_length/max_length)`, `validate_calendar_date` on `joined_on`, a model validator rejecting equal shifts. |
+| 5 | `create_employee` | `find_one` then `insert_one`: two concurrent creates can both pass the check. | Parallel `POST /employees` with the same `emp_code`: more than one 201. | Unique `emp_code` index is the only arbiter; `DuplicateKeyError` becomes 409. |
+| 6 | `create_employee` | `created_at = datetime.now()` is machine-local and naive; the raw datetime is returned instead of epoch milliseconds. | `created_at` in the response is an ISO string whose meaning depends on the server's time zone. | `utc_now()` cut to milliseconds; `serialize_employee` returns epoch ms and never `_id`. |
+| 7 | `list_employees` | `skip = page * page_size`: page 1 skips the first page. | *(run)* page=1, page_size=20: starter skips 20, `page_skip` gives 0. | `page_skip(page, page_size) = (page - 1) * page_size`. |
+| 8 | `list_employees` | `total` is `count_documents({})`, ignoring the department filter (R10). | `?department=X` returns a `total` of all employees. | `count_documents(q)` with the same filter as the page query. |
+| 9 | `list_employees` | `if department:` ignores an empty string; no sort; `page`/`page_size` unvalidated. | `?department=` returns everyone; unstable order; `page_size=100000` or `page=0` accepted. | `employee_list_filter` tests `is None` (exact, case-sensitive match); `.sort("emp_code", 1)`; `Query(ge=1)` and `Query(ge=1, le=100)`. |
+| 10 | `punch_in` | Unknown employee gives `emp = None`, then `emp["shift_start"]` raises: a 500. | Punch-in for an `emp_code` that does not exist. | `if emp is None: raise HTTPException(404, ...)`. |
+| 11 | `punch_in` | `datetime.fromtimestamp(ms / 1000)` uses the machine's local zone; `if body.punched_at` treats 0 as "omitted"; `Optional[int]` is lax about seconds-sized and float values. | A seconds-sized value is accepted as an instant (should be 422); the stored time shifts with the server's time zone. | Strict `EpochMillis` (an int in the contract range, not bool/float/str), `instant_from_epoch_ms` (aware UTC, cut to whole seconds); omitted means now. |
+| 12 | `punch_in` | `date` is `ts.date()` in local time, not the IST date, and has no overnight rule (R1). | On a server not set to IST, a punch-in near midnight IST is stored under the wrong date; an overnight shift's early-morning punch-in gets the wrong day. | `attendance_date(punch_in, shift_start, shift_end)`: IST date; overnight punch-ins earlier than `shift_end` belong to the previous day. |
+| 13 | `punch_in` / `PunchInIn` | `status: str` accepts anything (including `ABSENT`, `LEAVE`, or nonsense). | Punch-in with `status: "BANANA"` returns 201. | `Literal["PRESENT", "WFH", "ON_DUTY"]` (422 otherwise). |
+| 14 | `punch_in` | `find_one` then `insert_one`: a race between two identical punch-ins. | Two simultaneous punch-ins for the same employee and date: two 201s. | Unique `(emp_code, date)` index; `DuplicateKeyError` becomes 409. |
+| 15 | `punch_in` | The response adds `id` (the ObjectId as a string) and returns raw datetimes. | Response body has `id`; `punch_in` is not epoch milliseconds. | `serialize_attendance`: exactly the contract keys, instants as epoch ms, legacy defaults (late/overtime 0, half_day false, history []). |
+| 16 | `list_attendance` | `list(find(q))` loads the whole collection into Python, sorts only by `date`, slices in Python and uses `len` as `total`; truthiness filters ignore empty strings; no validation of dates, status or pagination; exposes `id`. | `GET /attendance` on ~100,000 records loads everything; ties on `date` have no stable order; `date_from=abc` is accepted. | `attendance_page_cursor`: filter, sort `(date -1, emp_code 1)`, `skip`, `limit` run in MongoDB; `count_documents(q)`; `_checked_date_param`, `validate_date_range`, `AttendanceStatus`, `Query` bounds (422). |
+| 17 | module level | No index is created. | Every list/analytics query scans the collection. | `INDEXES` + `ensure_indexes`, run idempotently at startup (`lifespan`) and retried by `/health`. |
+| 18 | `health` | Always returns 200, even when MongoDB is down. | Stop MongoDB: `/health` still says `ok`. | Pings MongoDB; `PyMongoError` becomes 503 with a fixed message. |
+| 19 | `MongoClient(...)` | Hard-coded default URI literal, naive datetimes from PyMongo, no short server-selection timeout. | Connection details in source; naive `punch_in` values read back. | `MONGO_URI` / `MONGO_DB` from the environment only (no literal; PyMongo's own default applies when unset), `tz_aware=True`, `serverSelectionTimeoutMS=5000`. |
 
-## Scope and limitations
+The starter's `TODO` list (punch-out, PATCH, the four analytics endpoints, explain) is unimplemented work, not a defect, and is not counted above.
 
-These entries describe implementation risks addressed and tested. They do not claim that every item was independently confirmed as a defect in the original starter file. A complete line-by-line comparison of the starter implementation has not been documented here.
+## Looked at and kept (not defects)
 
-The reported regression run completed 595 tests with one skipped test. Query-plan diagnostics were also run against MongoDB 7.0.43.
+- **Calendar dates as `YYYY-MM-DD` strings with `$gte`/`$lte`.** DATA_MODEL.md says dates are plain strings on purpose; string order is chronological, so `attendance_list_filter` keeps the string comparison.
+- **New punch-in record defaults** (`punch_out` null, `work_hours` null, `overtime_minutes` 0, `half_day` false, `history` []) match the DATA_MODEL table; `build_attendance_doc` keeps them.
+- **Status codes and messages** the starter already used (201 on create, 409 "already punched in for this date", the `items / total / page / page_size` envelope) match openapi.yaml and were kept.
+
+## Analytics: behaviour that depends on interpretation
+
+The contract does not settle these, so they are documented decisions, not claimed facts (details in `PHASE_NOTES.md`): records dated before an employee's `joined_on` still count in the analytics; an empty-string department is left out of the department summary; the trend allows at most 92 inclusive dates; the 7-day moving average averages the already-rounded daily rates. The reported full regression run completed with 608 tests passing and 1 skipped. Earlier explain diagnostics on MongoDB 7.0.43 covered six trend scenarios using approximately 100,000 attendance records and 5,000 employees; those scenarios reported IXSCAN without COLLSCAN. These results do not establish that every analytics endpoint or query shape was tested at that scale.

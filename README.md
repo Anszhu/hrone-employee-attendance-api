@@ -1,104 +1,48 @@
 # Employee Attendance & Analytics API
 
-A REST API built with FastAPI and MongoDB for employee management, attendance tracking, attendance regularization, and analytics.
+A REST API built with FastAPI and MongoDB for employee management,
+attendance tracking, attendance regularization, and attendance analytics.
 
 ## Technology Stack
 
 - Python 3.11+
 - FastAPI
 - PyMongo
-- MongoDB 7.0
-- Pydantic
-
-## Features
-
-- Employee creation, listing, filtering, and pagination
-- Attendance punch-in and punch-out
-- Attendance listing with filters and pagination
-- Attendance regularization with an audit history
-- Employee monthly attendance summaries
-- Department attendance summaries
-- Late-arrival leaderboard with competition ranking
-- Department attendance trends with seven-day moving averages
-- Health checks and MongoDB execution-plan diagnostics
-- MongoDB indexes and aggregation pipelines
-
-## Prerequisites
-
-- Python 3.11 or newer
-- MongoDB 6.0 or newer; MongoDB 7.0 is recommended
+- MongoDB 6.0+
 
 ## Setup
 
-### Windows PowerShell
+Install the dependencies:
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+    pip install -r requirements.txt
 
-### macOS / Linux
+Configure the MongoDB connection using environment variables:
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+- MONGO_URI
+- MONGO_DB
 
-## Configuration
+Start the application from the repository root:
 
-Set these environment variables before starting the application:
+    uvicorn app.main:app --port 8000
 
-- `MONGO_URI`: MongoDB connection URI
-- `MONGO_DB`: MongoDB database name
+MongoDB indexes are created at application startup.
 
-Example for a local MongoDB instance in PowerShell:
+## Implemented Features
 
-```powershell
-$env:MONGO_URI = "mongodb://localhost:27017"
-$env:MONGO_DB = "attendance"
-```
+- Employee creation and paginated employee listing
+- Attendance punch-in and punch-out
+- Attendance filtering and pagination
+- Attendance regularization with audit history
+- Employee monthly attendance analytics
+- Department attendance summaries
+- Late-arrival leaderboard with competition ranking
+- Department trends with seven-day moving averages
+- Health checks and MongoDB execution-plan diagnostics
 
-Use your own connection URI and database name as appropriate. Never commit credentials or secrets.
+## Verification
 
-## Run the API
-
-```bash
-uvicorn app.main:app --port 8000
-```
-
-Open `/docs` on the running server for interactive API documentation.
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Application/database health |
-| POST | `/employees` | Create an employee |
-| GET | `/employees` | List employees |
-| POST | `/attendance/punch-in` | Record punch-in |
-| POST | `/attendance/punch-out` | Record punch-out |
-| GET | `/attendance` | List attendance records |
-| PATCH | `/attendance/{emp_code}/{date}` | Regularize attendance |
-| GET | `/analytics/employees/{emp_code}/monthly?month=YYYY-MM` | Employee monthly summary |
-| GET | `/analytics/departments/summary?month=YYYY-MM` | Department summary |
-| GET | `/analytics/leaderboard/late?month=YYYY-MM` | Late-arrival leaderboard |
-| GET | `/analytics/departments/{department}/trend?from=YYYY-MM-DD&to=YYYY-MM-DD` | Department attendance trend |
-| GET | `/admin/explain/{endpoint}` | Query execution-plan diagnostics |
-
-Refer to `openapi.yaml` and `/docs` for request parameters, schemas, and response details.
-
-## Testing
-
-The implementation was tested locally against MongoDB 7.0.43. The reported full regression run completed with 595 tests and one skipped test.
-
-## Repository Contents
-
-- `app/main.py`: API implementation
-- `requirements.txt`: Python dependencies
-- `openapi.yaml`: API contract
-- `DATA_MODEL.md`: data model reference
-- `REVIEW.md`: implementation review
-- `DECISIONS.md`: design decisions
-- `.gitignore`: excludes local artifacts and secrets
+The development regression run completed with 608 tests passing
+and one skipped. Explain-plan diagnostics on MongoDB 7.0.43
+verified index scans without collection scans in the reported
+scenarios. These results do not imply that every query shape
+was benchmarked at scale.
