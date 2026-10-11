@@ -1,0 +1,15 @@
+﻿.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.log
+*.before-*
+*.backup
+*.bak
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
