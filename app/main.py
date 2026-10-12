@@ -1,12 +1,11 @@
 """
-Employee Attendance & Analytics API - STARTER
+Employee Attendance & Analytics API
 
 Run:  uvicorn app.main:app --port 8000
-Env:  MONGO_URI, MONGO_DB (a local .env is loaded for convenience)
+Env:  MONGO_URI, MONGO_DB (a local .env, if present, is loaded for convenience; real environment
+      variables take precedence)
 
-This file was written quickly by a colleague who has left the company. The happy path
-works, but nobody has reviewed it. Read PROBLEM_STATEMENT.docx for what is expected of you,
-openapi.yaml for the contract and DATA_MODEL.md for what is stored in MongoDB.
+Contract: openapi.yaml. Stored data: DATA_MODEL.md. Design decisions: DECISIONS.md. Review notes: REVIEW.md.
 """
 import calendar
 import json
@@ -22,6 +21,7 @@ from dotenv import load_dotenv
 from bson import json_util
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import ConnectionFailure, DuplicateKeyError, PyMongoError
@@ -937,6 +937,17 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Employee Attendance & Analytics API", version="2.0.0", lifespan=lifespan)
 
 
+@app.exception_handler(PyMongoError)
+async def database_unavailable(_request, exc: PyMongoError):
+    """Any PyMongo failure that no route handled itself (server unreachable, timeout, command failure)
+    becomes a fixed 503. Routes keep handling their expected cases first (DuplicateKeyError -> 409, the
+    /health 503, 404/422). Only the exception's class name is logged and nothing from its message is
+    returned, because driver messages can contain hostnames or credentials. Non-PyMongo exceptions are
+    deliberately not covered: a programming error stays a 500."""
+    logger.error("database error: %s", type(exc).__name__)
+    return JSONResponse(status_code=503, content={"detail": "database unavailable"})
+
+
 # --------------------------------------------------------------------------- #
 # Models
 # --------------------------------------------------------------------------- #
@@ -1103,6 +1114,14 @@ def punch_out(body: PunchOutIn):
         {"emp_code": body.emp_code, "punch_in": {"$lte": ts}}, sort=[("punch_in", -1)]
     )
     if rec is None:
+        # No record starts at or before punched_at. If any later punch-in exists, punched_at is before that
+        # record's punch_in, which the contract classifies as 422 regardless of whether that record is still open.
+        # This read runs only on the no-eligible-record path; the atomic close below is unchanged.
+        later = db.attendance_logs.find_one(
+            {"emp_code": body.emp_code, "punch_in": {"$gt": ts}}, {"punch_out": 1}, sort=[("punch_in", 1)]
+        )
+        if later is not None:
+            raise HTTPException(422, "punched_at must be after punch_in")
         raise HTTPException(404, "no punch-in found")
     if rec.get("punch_out") is not None:  # null or missing means still open
         raise HTTPException(409, "already punched out")

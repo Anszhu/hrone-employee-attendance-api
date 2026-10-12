@@ -10,4 +10,4 @@
 
 5. **At 100x.** I would benchmark the list endpoints, optimize expensive total-count queries, and consider keyset pagination for deep-page access if the API contract allowed cursor-based navigation. This would reduce the cost of accessing later pages without silently changing the existing page-number contract.
 
-Phase-specific notes: `PHASE_NOTES.md`.
+6. **Configuration.** `MONGO_URI` / `MONGO_DB` come from the environment (a `.env` never overrides a real variable). The assignment does not make `MONGO_URI` mandatory, so an unset one keeps PyMongo's default host instead of failing at import; failing would change startup behaviour for tools that import the app without a database. Unreachable MongoDB is reported by `/health` (503), not by crashing.

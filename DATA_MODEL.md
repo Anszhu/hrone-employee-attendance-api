@@ -118,8 +118,8 @@ are epoch milliseconds. This is easy to forget because the dates sit inside a ne
 
 ## 5. Sample documents
 
-The files in `sample_data/` hold these documents as MongoDB Extended JSON, so you can load them with
-`python sample_seed.py` or `mongoimport --jsonArray` (`_id` is omitted; MongoDB generates it).
+The nine documents below show the stored shapes (`_id` is omitted; MongoDB generates it). This repository does not ship
+sample data files or a seed script.
 
 **They show the shapes only.** The grader's dataset is much larger and contains cases that these nine do not (ties, weekend
 records, employees with no logs at all, people who join mid-month, and more). Passing on this sample proves nothing about

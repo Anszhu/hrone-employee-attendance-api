@@ -12,20 +12,44 @@ attendance tracking, attendance regularization, and attendance analytics.
 
 ## Setup
 
-Install the dependencies:
+Create a virtual environment (optional) and install the dependencies:
 
+    python -m venv .venv
     pip install -r requirements.txt
 
-Configure the MongoDB connection using environment variables:
+Configuration is read from environment variables (a local `.env` file, if you create one, is also read;
+a real environment variable always wins). Never commit `.env`.
 
-- MONGO_URI
-- MONGO_DB
+- `MONGO_URI`: MongoDB connection string. The assignment only requires that it is read from the environment and never
+  hard-coded; it does not say the variable is mandatory. If it is unset (or empty) the app does not fail: no URI is
+  written in the source and PyMongo's own default host (`localhost:27017`) applies, which suits local development. Set it
+  explicitly for any other deployment; a wrong or unreachable URI shows up as `/health` 503.
+- `MONGO_DB`: database name. Defaults to `attendance_db`.
 
 Start the application from the repository root:
 
     uvicorn app.main:app --port 8000
 
-MongoDB indexes are created at application startup.
+Required indexes are created idempotently at startup. If MongoDB is unreachable at startup the app still starts and
+`GET /health` answers 503 until MongoDB responds and the indexes exist; any other index-creation error stops startup.
+
+## Health and errors
+
+- `GET /health` returns 200 only when MongoDB answers a ping and the startup indexes exist, otherwise 503.
+- 422: invalid input. 404: unknown employee or no matching record. 409: duplicates and lost concurrent updates.
+- Any other PyMongo failure not handled by a route returns 503 `{"detail": "database unavailable"}`; driver messages
+  (which can contain hosts or credentials) are never returned. Programming errors are not converted into 503.
+- `POST /attendance/punch-out`: 404 for an unknown employee or no matching punch-in; 422 if `punched_at` is at or before
+  the relevant punch-in or more than 24 hours after it (exactly 24 hours is allowed); 409 if the selected eligible record
+  is already punched out.
+
+## Tests
+
+    python -m unittest discover -s tests -t . -v
+
+`tests/test_phase6.py` needs no database (it uses in-memory fakes) and needs `httpx` for FastAPI's `TestClient`.
+Tests that use a real MongoDB, where present, run only when `TEST_MONGO_URI` points at a disposable MongoDB and use their own
+`attendance_test_*` databases, never `MONGO_DB`. Test results are not recorded in this repository.
 
 ## Implemented Features
 
@@ -41,8 +65,5 @@ MongoDB indexes are created at application startup.
 
 ## Verification
 
-The development regression run completed with 608 tests passing
-and one skipped. Explain-plan diagnostics on MongoDB 7.0.43
-verified index scans without collection scans in the reported
-scenarios. These results do not imply that every query shape
-was benchmarked at scale.
+No test or explain-plan results are claimed in this README; run the commands above to obtain them. Index definitions
+and the reasons for them are in `DECISIONS.md`.
