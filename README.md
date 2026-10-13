@@ -18,8 +18,7 @@ Create a virtual environment (optional), activate it, and install the dependenci
     .venv\Scripts\Activate.ps1        # Windows PowerShell   (macOS/Linux: source .venv/bin/activate)
     pip install -r requirements.txt
 
-The aggregation endpoints use `$setWindowFields`, `$dateAdd` and a `$lookup` with a sub-pipeline, so MongoDB 5.0 or newer
-is required (6.0+ is what this project was prepared for).
+MongoDB 6.0 or newer is required for this assignment. The application has been tested locally against MongoDB 7.0.43.
 
 Configuration is read from environment variables (a local `.env` file, if you create one, is also read;
 a real environment variable always wins). Never commit `.env`.

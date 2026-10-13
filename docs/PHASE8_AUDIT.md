@@ -1,18 +1,12 @@
 # Phase 8 audit: final candidate review
 
-Scope: the Phase 7 project (`hrone-employee-attendance-api-main2.zip`) audited against `openapi.yaml`, `DATA_MODEL.md`, `README.md`,
-`REVIEW.md` and `DECISIONS.md`. Nothing was committed or pushed. No MongoDB server was available where this audit ran
-(Linux sandbox, Python 3.13, no `mongod`, no route to MongoDB downloads), so everything that needs a real server is listed as
-**not verified** and has a command in section 10.
+Scope: the Phase 7 project (`hrone-employee-attendance-api-main2.zip`) was initially audited against `openapi.yaml`, `DATA_MODEL.md`, `README.md`, `REVIEW.md` and `DECISIONS.md`. The initial audit ran in a Linux sandbox without a MongoDB server. Subsequent local verification was performed on Windows against MongoDB 7.0.43. The original sandbox findings and the later Windows results are distinguished throughout this report.
 
-Evidence labels: **tested** = run and observed passing here; **inspected** = read, not executed; **not verified** = needs your PC.
+Evidence labels: **tested** = run and observed passing in the named environment; **inspected** = read, not executed; **not verified** = not covered by the recorded evidence.
 
 ## 1. Verdict
 
-No blocker and no confirmed code defect was found. `app/main.py` was **not changed**. The candidate is not yet "final":
-the real-MongoDB tests, the explain-plan tests, and the live server plus HTTP smoke test have not been run by anyone in this
-review. Two files changed: `README.md` (Windows activation line, MongoDB version floor, `TEST_MONGO_URI` and smoke-test
-instructions) and one added file, `scripts/smoke_test.py`. This report is added as `docs/PHASE8_AUDIT.md`.
+No blocker or confirmed code defect was found in the reviewed implementation. `app/main.py` was **not changed** during Phase 8. The initial Linux review could not run real-MongoDB tests or explain plans; subsequent Windows verification ran the full test suite against local MongoDB 7.0.43 and the HTTP smoke test, with results recorded in section 12. The Phase 8 changes are the README updates, `scripts/smoke_test.py`, and this report. Git publication and fresh-clone checks remain to be completed.
 
 Not available to this audit, and therefore not invented: the original problem statement document (it is not in the zip), and
 the Git metadata (the zip has no `.git`, so `git status`, branch, `origin/main` parity and tracked-file checks must be run by you, section 10).
@@ -37,22 +31,22 @@ Source: `openapi.yaml` (R1-R10 and endpoint text) and `DATA_MODEL.md`. "Fakes" m
 | Requirement | Where | Status | Gap / action |
 |---|---|---|---|
 | Routes, methods, params match contract (11 paths) | all | VERIFIED BY LIVE LOCAL TEST (server started, `/openapi.json` listed) | none |
-| `/health` 200 only if ping works, else 503 | `health` | VERIFIED BY LIVE LOCAL TEST (503 with MongoDB unreachable); 200 path NOT VERIFIED | run section 10 |
-| Indexes at startup, idempotent | `INDEXES`, `ensure_indexes`, `lifespan` | INSPECTED, NOT EXECUTED against a server | startup log on your PC |
+| `/health` 200 only if ping works, else 503 | `health` | Unreachable-MongoDB 503 verified in the initial sandbox; local smoke test passed health checks against MongoDB | Covered by local smoke test |
+| Indexes at startup, idempotent | `INDEXES`, `ensure_indexes`, `lifespan` | Real-MongoDB test suite and live smoke test passed locally; index creation was exercised in the local environment | Startup behavior was exercised by the local run; no claim about every failure mode |
 | `MONGO_URI`/`MONGO_DB` from env, real env wins over `.env` | top of `main.py` | INSPECTED; unreachable-URI behaviour VERIFIED BY LIVE LOCAL TEST | none |
-| Employee create, unique `emp_code`, 409 | `create_employee` | VERIFIED BY TEST (fakes); race safety rests on the unique index: NOT VERIFIED on real MongoDB here | real-MongoDB tests |
-| Employee list, filter, sort, `total` | `list_employees` | VERIFIED BY TEST (fakes) | real-MongoDB tests |
+| Employee create, unique `emp_code`, 409 | `create_employee` | Tests with fakes and real-MongoDB suite passed; smoke test passed create and duplicate checks | No known gap from the recorded tests |
+| Employee list, filter, sort, `total` | `list_employees` | Fake-backed tests, real-MongoDB suite, and HTTP smoke test passed | No known gap from the recorded tests |
 | Punch-in: 404/409/422, IST date, overnight, late | `punch_in`, helpers | VERIFIED BY TEST; R1/R2 examples re-checked independently | none |
 | Epoch-ms strictness (seconds, float, str, bool, range) | `validate_epoch_ms` | VERIFIED BY TEST + spot check; HTTP 422 for seconds-sized value VERIFIED against a mock-backed server | none |
 | R3 overtime, R4 half-up hours, R5 half day | helpers | VERIFIED BY TEST + spot check (incl. DATA_MODEL samples 1, 2, 7) | none |
-| Punch-out 404/409/422, 24 h window | `punch_out` | VERIFIED BY TEST (fakes); simultaneous-close race NOT VERIFIED on real MongoDB here | real-MongoDB tests |
-| Attendance list, sort, `date_from > date_to` 422 | `list_attendance` | VERIFIED BY TEST (fakes) | real-MongoDB tests |
-| PATCH rules, recompute, one history entry, only changed fields | `plan_regularization` | VERIFIED BY TEST; behaviour re-run over HTTP on a mock-backed server (see section 8) | real-MongoDB tests for the concurrency filter |
-| Monthly analytics (R5-R8) | `employee_monthly_pipeline` | VERIFIED BY TEST (emulator); real aggregation NOT VERIFIED here | real-MongoDB tests |
-| Department summary (R9, zero-log staff count, avg hours) | `department_summary_pipeline` | VERIFIED BY TEST (emulator; my hand-computed scenario also matches it); real aggregation NOT VERIFIED | real-MongoDB tests |
-| Leaderboard: competition ranking, limit after ranking, tie order | `late_leaderboard_pipeline` | VERIFIED BY TEST (emulator); real `$setWindowFields` NOT VERIFIED | real-MongoDB tests |
-| Trend: one row per day, headcount R9, rate rules, 7-day window, 404/422 | `department_trend_pipeline` | VERIFIED BY TEST (emulator); real `$dateAdd`/`$setWindowFields` NOT VERIFIED | real-MongoDB tests |
-| Explain: IXSCAN and no COLLSCAN on ~100k records | `admin_explain` | NOT VERIFIED (needs MongoDB; the grader's dataset is larger than any local one) | section 10 |
+| Punch-out 404/409/422, 24 h window | `punch_out` | Fake-backed tests, real-MongoDB suite, and HTTP smoke test passed | No separate claim beyond the exercised test scenarios |
+| Attendance list, sort, `date_from > date_to` 422 | `list_attendance` | Fake-backed tests, real-MongoDB suite, and HTTP smoke test passed | No known gap from the recorded tests |
+| PATCH rules, recompute, one history entry, only changed fields | `plan_regularization` | Tests and HTTP smoke test passed; real-MongoDB suite passed | Results apply to the exercised scenarios |
+| Monthly analytics (R5-R8) | `employee_monthly_pipeline` | Emulator tests and local real-MongoDB suite passed; HTTP smoke test passed | No performance claim beyond tested data and queries |
+| Department summary (R9, zero-log staff count, avg hours) | `department_summary_pipeline` | Emulator and local real-MongoDB tests passed; tested explain plans showed IXSCAN and no COLLSCAN | Plan result applies to tested query shapes and datasets |
+| Leaderboard: competition ranking, limit after ranking, tie order | `late_leaderboard_pipeline` | Emulator tests and local real-MongoDB suite passed; tested explain plan showed IXSCAN and no COLLSCAN | Plan result applies to tested query shapes and datasets |
+| Trend: one row per day, headcount R9, rate rules, 7-day window, 404/422 | `department_trend_pipeline` | Emulator tests and local real-MongoDB suite passed; tested explain plans showed IXSCAN and no COLLSCAN | Plan result applies to tested query shapes and datasets |
+| Explain: IXSCAN and no COLLSCAN on ~100k records | `admin_explain` | Tested locally; the listed query shapes showed IXSCAN and no COLLSCAN | Grader-scale behavior is not established by these local results |
 | Everything lives in `app/main.py` | repo layout | VERIFIED BY INSPECTION (one source file) | none |
 
 ## 4. Actual defects
@@ -64,19 +58,20 @@ ordering, PATCH conditional write (state pinned by status, both punch times and 
 
 ## 5. Missing verification (not defects)
 
-| Item | Severity | Why it matters |
+| Item | Status after Windows verification | Remaining action |
 |---|---|---|
-| Real-MongoDB suites (74 tests, skipped here) | HIGH until run | They are the only proof that the aggregations and race-safety behave on a server |
-| `department_summary` explain plan: its first stage filters `employees` on `joined_on` plus a `$type`/`$ne` test on `department`; no index leads with `joined_on`, so whether the planner uses the `(department, emp_code)` index is a plan decision I could not observe | MEDIUM | The assignment states the grader rejects COLLSCAN. `REVIEW.md` says explain results were reported for the six trend scenarios only |
-| Live server start with a real MongoDB, startup index log | MEDIUM | Not seen by me; only the unreachable-MongoDB start was |
-| Git state, `origin/main` parity, tracked junk | MEDIUM | No `.git` in the zip |
+| Real-MongoDB test suite | Run locally: 648 tests, 1 skipped, 0 failures | Retain test output if needed for submission evidence |
+| Analytics explain plans | Tested query shapes reported IXSCAN with no COLLSCAN, including department summary and department trend | Results apply only to tested datasets and query shapes; do not infer grader-scale performance |
+| Live server and HTTP smoke test | Smoke test passed 46/46 checks against local MongoDB | Keep using a disposable database for smoke tests |
+| Git state, `origin/main` parity, tracked junk | Not established by the test results in this report | Complete section 11 before submission |
+| Fresh-clone verification | Not established by the test results in this report | Complete after pushing |
 
 ## 6. Documentation issues
 
 | Issue | Severity | Action |
 |---|---|---|
 | README did not say how to activate the venv on Windows | LOW | Fixed in README |
-| README did not state the MongoDB minimum (the pipelines need 5.0+) | LOW | Fixed in README |
+| README did not consistently state the assignment's MongoDB minimum | LOW | Fixed in README: MongoDB 6.0+ required; local test server was MongoDB 7.0.43 |
 | README did not show how to enable the real-MongoDB tests | LOW | Fixed in README |
 | `DATA_MODEL.md` says the repo ships no sample data, yet `sample_data/` exists and is used by `tests/test_phase5_2.py` | LOW | Left alone: `DATA_MODEL.md` is the assignment's file. Harmless |
 | `REVIEW.md` quotes "608 tests" from an earlier run; today's count is 648 | NO ACTION | It is labelled as reported earlier and not re-run |
@@ -86,7 +81,7 @@ ordering, PATCH conditional write (state pinned by status, both punch times and 
 
 ## 7. Environment and setup risks
 
-- MongoDB must be 5.0+ (`$setWindowFields`, `$dateAdd`, `$lookup` with a sub-pipeline). Check with `mongod --version` or `mongosh --eval "db.version()"`.
+- The README specifies MongoDB 6.0+ for the assignment. Local verification used MongoDB 7.0.43. Check the installed version with `mongod --version` or `mongosh --eval "db.version()"`.
 - `MONGO_URI` unset means PyMongo's default `localhost:27017`; fine for the normal local URI. `MONGO_DB` unset means `attendance_db`, which is the normal application database: never aim the smoke test at it.
 - A wrong URI is not a crash: the app starts and `/health` answers 503. Any non-connection index error (for example a unique index over existing duplicate rows) stops startup on purpose.
 - Windows MongoDB service name on your PC is `MongoDB`: `Get-Service MongoDB`.
@@ -110,7 +105,7 @@ Other runs:
 
 ## 9. Recommended Phase 8 changes (made)
 
-1. `README.md`: venv activation for PowerShell, MongoDB 5.0+ note, `TEST_MONGO_URI` example, smoke-test section.
+1. `README.md`: venv activation for PowerShell, consistent MongoDB 6.0+ requirement, `TEST_MONGO_URI` example, smoke-test section.
 2. `scripts/smoke_test.py`: stdlib-only HTTP smoke test, refuses to write without `--db-name` and `--yes`, unique employee codes and department, no deletion.
 3. This report.
 
@@ -125,21 +120,44 @@ Optional and not done: pin dependency versions after you capture `pip freeze`; a
     pip freeze | Select-String -Pattern "fastapi|pymongo|pydantic|dotenv|uvicorn|httpx"
     python -m unittest tests.test_phase7 -v
     $env:TEST_MONGO_URI = "mongodb://localhost:27017"
-    python -m unittest discover -s tests -t . -v                 # expect 648 run, 0 failures, 0 or few skips
-    Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue   # must be empty before starting
-    $env:MONGO_DB = "attendance_smoke"
-    uvicorn app.main:app --port 8000                              # keep this terminal visible
-    # second terminal, same folder:
-    curl.exe -s localhost:8000/health                             # {"status":"ok"}
-    python scripts/smoke_test.py --db-name attendance_smoke --yes # expect 0 failures; explain lines are INFO
+    python -m unittest discover -s tests -t . -v                 # observed: 648 tests, 1 skipped, 0 failures
+    # The live server and smoke test were also run locally; see section 12.
 
-Pass criteria: no test failures, `/health` ok, smoke script exit code 0. Look at the `INFO` explain lines: any `COLLSCAN=True` for
-`department_summary` is the item to investigate first (section 5).
+The test-suite, smoke-test, and explain-plan outcomes recorded in section 12 were observed on the local Windows environment.
+The Git-state and fresh-clone checks in section 11 remain outstanding.
 
 ## 11. Final GitHub publication checklist
 
-- [ ] Section 10 passed on your PC, and you read the output yourself.
-- [ ] `git diff --stat` shows only `README.md` plus the new `scripts/` and `docs/` files; `app/main.py` unchanged.
-- [ ] `git status` shows no `.env`, `.venv`, caches or zips staged.
-- [ ] Commit and push to the existing `main`, no history rewrite.
+- [ ] Review `git diff --check`, `git diff --stat`, and the final diff.
+- [ ] Confirm `app/main.py` is unchanged unless a separately reviewed code fix is necessary.
+- [ ] Confirm `git status` shows no `.env`, `.venv`, caches, test output, or ZIP files staged.
+- [ ] Confirm `main` and `origin/main` are in the expected state and inspect tracked files.
+- [ ] Commit and push to the existing `main`, without rewriting history.
 - [ ] After pushing, clone the repository into a fresh folder, install from `requirements.txt`, start the app, and open `/docs`.
+
+## 12. Local Windows Verification - 2026-10-13
+
+Environment: Windows PowerShell, Python virtual environment, local MongoDB 7.0.43.
+
+### Test results
+
+| Verification | Observed result |
+|---|---|
+| Full unittest suite with `TEST_MONGO_URI` configured | 648 tests ran; OK; 1 skipped |
+| Windows-specific skip | `test_identical_results_in_every_zone` skipped because `time.tzset` is unavailable on Windows |
+| HTTP smoke test | 46/46 checks passed |
+| `department_summary` explain plan, unfiltered | IXSCAN present; COLLSCAN absent |
+| `department_summary` explain plan, filtered | IXSCAN present; COLLSCAN absent |
+| `department_trend` explain plan, wide range | IXSCAN present; COLLSCAN absent |
+| `department_trend` explain plan, one-day range | IXSCAN present; COLLSCAN absent |
+| Other tested analytics explain plans | IXSCAN present; COLLSCAN absent for the tested query shapes |
+
+The explain-plan results apply to the tested datasets and query shapes. They do not establish performance or index selection for every possible query or for the grader's larger dataset.
+
+### Smoke-test database
+
+The HTTP smoke test used the disposable database `attendance_phase8_smoke`. The smoke script writes test data and does not delete it. Do not use the normal application database for smoke testing.
+
+### Final interpretation
+
+The Windows test suite, live HTTP smoke test, and listed explain-plan checks passed in the tested environment. Earlier Linux sandbox results remain useful as a record of that initial review, but they should not be mistaken for the later Windows test results. Git publication checks and fresh-clone verification still need to be completed before submission.
