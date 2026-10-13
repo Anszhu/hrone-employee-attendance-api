@@ -12,10 +12,14 @@ attendance tracking, attendance regularization, and attendance analytics.
 
 ## Setup
 
-Create a virtual environment (optional) and install the dependencies:
+Create a virtual environment (optional), activate it, and install the dependencies:
 
     python -m venv .venv
+    .venv\Scripts\Activate.ps1        # Windows PowerShell   (macOS/Linux: source .venv/bin/activate)
     pip install -r requirements.txt
+
+The aggregation endpoints use `$setWindowFields`, `$dateAdd` and a `$lookup` with a sub-pipeline, so MongoDB 5.0 or newer
+is required (6.0+ is what this project was prepared for).
 
 Configuration is read from environment variables (a local `.env` file, if you create one, is also read;
 a real environment variable always wins). Never commit `.env`.
@@ -50,6 +54,21 @@ Required indexes are created idempotently at startup. If MongoDB is unreachable 
 `tests/test_phase6.py` needs no database (it uses in-memory fakes) and needs `httpx` for FastAPI's `TestClient`.
 Tests that use a real MongoDB, where present, run only when `TEST_MONGO_URI` points at a disposable MongoDB and use their own
 `attendance_test_*` databases, never `MONGO_DB`. Test results are not recorded in this repository.
+
+To include the real-MongoDB tests (PowerShell; they otherwise show up as skipped, which is not a pass):
+
+    $env:TEST_MONGO_URI = "mongodb://localhost:27017"
+    python -m unittest discover -s tests -t . -v
+
+## Smoke test against a running server
+
+`scripts/smoke_test.py` (standard library only) drives every endpoint over HTTP. It writes data and never deletes it, so start
+the server on a throw-away database first:
+
+    $env:MONGO_DB = "attendance_smoke"
+    uvicorn app.main:app --port 8000
+    # in a second terminal
+    python scripts/smoke_test.py --db-name attendance_smoke --yes
 
 ## Implemented Features
 
